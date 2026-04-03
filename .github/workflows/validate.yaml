@@ -1,0 +1,61 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifest
+        run: |
+          grep -q '^name: speckit$' manifest.yaml
+          echo "Manifest: OK"
+
+      - name: Validate workflows
+        run: |
+          for w in init constitution specify clarify plan tasks analyze checklist implement taskstoissues; do
+            test -f "workflows/$w.yaml" || { echo "MISSING: workflows/$w.yaml"; exit 1; }
+          done
+          echo "Workflows: all 10 present"
+
+      - name: Validate YAML syntax
+        run: |
+          pip install pyyaml --quiet
+          for f in workflows/*.yaml manifest.yaml; do
+            python3 -c "import yaml; yaml.safe_load(open('$f'))" || { echo "INVALID YAML: $f"; exit 1; }
+          done
+          echo "YAML syntax: OK"
+
+      - name: Validate shell scripts
+        run: |
+          for f in scripts/*.sh; do
+            bash -n "$f" || { echo "INVALID BASH: $f"; exit 1; }
+          done
+          echo "Shell syntax: OK"
+
+      - name: Validate prompts exist
+        run: |
+          for p in constitution/system specify/system clarify/system tasks/system analyze/system checklist/system plan/research plan/design implement/phase; do
+            test -f "prompts/$p.md" || { echo "MISSING: prompts/$p.md"; exit 1; }
+          done
+          echo "Prompts: all 9 present"
+
+      - name: Validate new scripts exist
+        run: |
+          for s in tasks-to-github-issues scan-checklists validate-spec create-requirements-checklist scan-ambiguities build-coverage-report detect-tech-stack resolve-chk-id scan-placeholders build-context-manifest extract-phases; do
+            test -f "scripts/$s.sh" || { echo "MISSING: scripts/$s.sh"; exit 1; }
+          done
+          echo "New scripts: all 11 present"
+
+      - name: Validate templates exist
+        run: |
+          for t in spec-template plan-template tasks-template constitution-template checklist-template agent-file-template; do
+            test -f "prompts/templates/$t.md" || { echo "MISSING: prompts/templates/$t.md"; exit 1; }
+          done
+          echo "Templates: all 6 present"

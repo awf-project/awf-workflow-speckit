@@ -1,0 +1,102 @@
+name: constitution
+description: "Create or update the project constitution with development principles"
+
+inputs:
+  - name: description
+    description: "Principles description or update instructions"
+    required: true
+
+states:
+  initial: ensure_structure
+
+  ensure_structure:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      mkdir -p "$REPO_ROOT/specs"
+      mkdir -p "$REPO_ROOT/.awf/templates/speckit"
+      echo "REPO_ROOT=$REPO_ROOT"
+    on_success: load_existing
+
+  load_existing:
+    type: step
+    command: |
+      REPO_ROOT=$(echo '{{.states.ensure_structure.Output}}' | grep '^REPO_ROOT=' | cut -d= -f2-)
+      CONSTITUTION="$REPO_ROOT/specs/constitution.md"
+      if [ -f "$CONSTITUTION" ]; then
+        echo "EXISTS=true"
+        echo "CONSTITUTION_PATH=$CONSTITUTION"
+      else
+        TEMPLATE="$REPO_ROOT/.awf/templates/speckit/constitution-template.md"
+        if [ -f "$TEMPLATE" ]; then
+          cp "$TEMPLATE" "$CONSTITUTION"
+          echo "EXISTS=false"
+          echo "CONSTITUTION_PATH=$CONSTITUTION"
+          echo "CREATED_FROM_TEMPLATE=true"
+        else
+          touch "$CONSTITUTION"
+          echo "EXISTS=false"
+          echo "CONSTITUTION_PATH=$CONSTITUTION"
+          echo "CREATED_FROM_TEMPLATE=false"
+        fi
+      fi
+    on_success: scan_tokens
+
+  scan_tokens:
+    type: step
+    command: |
+      CONSTITUTION_PATH=$(echo '{{.states.load_existing.Output}}' | grep 'CONSTITUTION_PATH=' | cut -d= -f2)
+      "{{.awf.scripts_dir}}/scan-placeholders.sh" "$CONSTITUTION_PATH"
+    on_success: load_constitution
+
+  load_constitution:
+    type: step
+    command: |
+      CONSTITUTION_PATH=$(echo '{{.states.load_existing.Output}}' | grep 'CONSTITUTION_PATH=' | cut -d= -f2)
+      cat "$CONSTITUTION_PATH"
+    on_success: load_templates
+
+  load_templates:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      echo "=== plan-template.md ==="
+      [ -f "$REPO_ROOT/.awf/templates/speckit/plan-template.md" ] && cat "$REPO_ROOT/.awf/templates/speckit/plan-template.md" || echo "(not found)"
+      echo ""
+      echo "=== spec-template.md ==="
+      [ -f "$REPO_ROOT/.awf/templates/speckit/spec-template.md" ] && cat "$REPO_ROOT/.awf/templates/speckit/spec-template.md" || echo "(not found)"
+      echo ""
+      echo "=== tasks-template.md ==="
+      [ -f "$REPO_ROOT/.awf/templates/speckit/tasks-template.md" ] && cat "$REPO_ROOT/.awf/templates/speckit/tasks-template.md" || echo "(not found)"
+    on_success: generate
+
+  generate:
+    type: agent
+    provider: claude
+    prompt_file: "{{.awf.prompts_dir}}/constitution/system.md"
+    options:
+      allowedTools: "Read,Grep,Glob,Edit,Write"
+      dangerouslySkipPermissions: true
+    timeout: 1300
+    on_success: post_check_constitution
+
+  post_check_constitution:
+    type: step
+    command: |
+      CONSTITUTION_PATH=$(echo '{{.states.load_existing.Output}}' | grep 'CONSTITUTION_PATH=' | cut -d= -f2)
+      "{{.awf.scripts_dir}}/post-check-constitution.sh" "$CONSTITUTION_PATH"
+    transitions:
+      - when: "states.post_check_constitution.Output contains 'CONSTITUTION_CHECK=fail'"
+        goto: constitution_warning
+      - goto: done
+
+  constitution_warning:
+    type: step
+    command: |
+      echo "WARNING: Constitution validation issues detected."
+      echo "{{.states.post_check_constitution.Output}}"
+    on_success: done
+
+  done:
+    type: terminal
+    status: success

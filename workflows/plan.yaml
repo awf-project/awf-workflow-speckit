@@ -1,0 +1,119 @@
+name: plan
+description: "Create a technical implementation plan from the feature specification"
+
+inputs:
+  - name: description
+    description: "Tech stack and architecture choices"
+    required: false
+    default: ""
+
+states:
+  initial: setup_plan
+
+  setup_plan:
+    type: step
+    command: "{{.awf.scripts_dir}}/setup-plan.sh"
+    on_success: detect_stack
+    on_failure: {message: "Plan setup failed: {{.states.setup_plan.Stderr}}", status: 1}
+
+  detect_stack:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      "{{.awf.scripts_dir}}/detect-tech-stack.sh" "$REPO_ROOT"
+    on_success: load_spec
+
+  load_spec:
+    type: step
+    command: |
+      FEATURE_SPEC=$(echo '{{.states.setup_plan.Output}}' | grep '^FEATURE_SPEC=' | cut -d= -f2-)
+      cat "$FEATURE_SPEC"
+    on_success: load_constitution
+
+  load_constitution:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      if [ -f "$REPO_ROOT/specs/constitution.md" ]; then
+        cat "$REPO_ROOT/specs/constitution.md"
+      else
+        echo "NO_CONSTITUTION"
+      fi
+    on_success: research_agent
+
+  research_agent:
+    type: agent
+    provider: claude
+    prompt_file: "{{.awf.prompts_dir}}/plan/research.md"
+    options:
+      allowedTools: "Read,Grep,Glob,Edit,Write"
+      dangerouslySkipPermissions: true
+    timeout: 300
+    on_success: verify_research
+
+  verify_research:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.setup_plan.Output}}' | grep '^SPECS_DIR=' | cut -d= -f2-)
+      if [ -f "$FEATURE_DIR/research.md" ]; then
+        echo "RESEARCH_EXISTS=true"
+      else
+        echo "RESEARCH_EXISTS=false"
+      fi
+    transitions:
+      - when: "states.verify_research.Output contains 'RESEARCH_EXISTS=false'"
+        goto: research_warning
+      - goto: load_research
+
+  research_warning:
+    type: step
+    command: |
+      echo "WARNING: research.md was not created by the research agent."
+      echo "Proceeding to design phase without research output."
+    on_success: design_agent
+
+  load_research:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.setup_plan.Output}}' | grep '^SPECS_DIR=' | cut -d= -f2-)
+      cat "$FEATURE_DIR/research.md"
+    on_success: post_check_research
+
+  post_check_research:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.setup_plan.Output}}' | grep '^SPECS_DIR=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/post-check-research.sh" "$FEATURE_DIR/research.md"
+    on_success: design_agent
+    on_failure: {message: "Research has unresolved clarifications: {{.states.post_check_research.Stderr}}", status: 1}
+
+  design_agent:
+    type: agent
+    provider: claude
+    prompt_file: "{{.awf.prompts_dir}}/plan/design.md"
+    options:
+      allowedTools: "Read,Grep,Glob,Edit,Write"
+      dangerouslySkipPermissions: true
+    timeout: 300
+    on_success: post_check_plan
+
+  post_check_plan:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.setup_plan.Output}}' | grep '^SPECS_DIR=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/post-check-plan.sh" "$FEATURE_DIR"
+    transitions:
+      - when: "states.post_check_plan.Output contains 'PLAN_CHECK=fail'"
+        goto: plan_warning
+      - goto: done
+
+  plan_warning:
+    type: step
+    command: |
+      echo "WARNING: Plan validation issues detected."
+      echo "{{.states.post_check_plan.Output}}"
+    on_success: done
+
+  done:
+    type: terminal
+    status: success

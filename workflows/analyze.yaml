@@ -1,0 +1,85 @@
+name: analyze
+description: "Non-destructive cross-artifact consistency and quality analysis"
+
+inputs:
+  - name: context
+    description: "Analysis focus"
+    required: false
+    default: ""
+
+states:
+  initial: check_prereqs
+
+  check_prereqs:
+    type: step
+    command: "{{.awf.scripts_dir}}/check-prerequisites.sh --require-tasks --include-tasks"
+    on_success: build_report
+    on_failure: {message: "Prerequisites check failed: {{.states.check_prereqs.Stderr}}", status: 1}
+
+  build_report:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/build-coverage-report.sh" "$FEATURE_DIR"
+    on_success: load_spec
+    on_failure: {message: "Coverage report failed: {{.states.build_report.Stderr}}", status: 1}
+
+  load_spec:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      cat "$FEATURE_DIR/spec.md"
+    on_success: load_plan
+
+  load_plan:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      cat "$FEATURE_DIR/plan.md"
+    on_success: load_tasks
+
+  load_tasks:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      cat "$FEATURE_DIR/tasks.md"
+    on_success: load_constitution
+
+  load_constitution:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      if [ -f "$REPO_ROOT/specs/constitution.md" ]; then
+        cat "$REPO_ROOT/specs/constitution.md"
+      else
+        echo "NO_CONSTITUTION"
+      fi
+    on_success: snapshot
+
+  snapshot:
+    type: step
+    command: |
+      SNAP="/tmp/awf-analyze-snapshot-$$.txt"
+      git status --porcelain 2>/dev/null > "$SNAP" || true
+      echo "$SNAP"
+    on_success: run_analysis
+
+  run_analysis:
+    type: agent
+    provider: claude
+    prompt_file: "{{.awf.prompts_dir}}/analyze/system.md"
+    options:
+      allowedTools: "Read,Grep,Glob"
+      dangerouslySkipPermissions: true
+    timeout: 600
+    on_success: post_check
+
+  post_check:
+    type: step
+    command: "{{.awf.scripts_dir}}/post-check-analyze.sh {{.states.snapshot.Output}}"
+    on_success: done
+    on_failure: {message: "Read-only violation: agent modified files. {{.states.post_check.Stderr}}", status: 1}
+
+  done:
+    type: terminal
+    status: success

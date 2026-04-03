@@ -1,0 +1,101 @@
+name: specify
+description: "Create a feature specification from a natural language description"
+
+inputs:
+  - name: description
+    description: "Feature description in natural language"
+    required: true
+  - name: short_name
+    description: "Custom 2-4 word branch name"
+    required: false
+    default: ""
+  - name: numbering
+    description: "Branch numbering mode: sequential or timestamp"
+    required: false
+    default: "sequential"
+
+states:
+  initial: create_feature
+
+  create_feature:
+    type: step
+    command: |
+      ARGS=""
+      if [ "{{.inputs.numbering}}" = "timestamp" ]; then
+        ARGS="$ARGS --timestamp"
+      fi
+      SHORT_NAME="{{.inputs.short_name}}"
+      if [ -n "$SHORT_NAME" ]; then
+        ARGS="$ARGS --short-name \"$SHORT_NAME\""
+      fi
+      eval "{{.awf.scripts_dir}}/create-feature.sh $ARGS \"{{.inputs.description}}\""
+    on_success: load_template
+    on_failure: {message: "Failed to create feature branch: {{.states.create_feature.Stderr}}", status: 1}
+
+  load_template:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      TEMPLATE="$REPO_ROOT/.awf/templates/speckit/spec-template.md"
+      if [ -f "$TEMPLATE" ]; then
+        cat "$TEMPLATE"
+      else
+        echo "NO_TEMPLATE"
+      fi
+    on_success: generate_spec
+
+  generate_spec:
+    type: agent
+    provider: claude
+    prompt_file: "{{.awf.prompts_dir}}/specify/system.md"
+    options:
+      allowedTools: "Read,Grep,Glob,Edit,Write"
+      dangerouslySkipPermissions: true
+    timeout: 300
+    on_success: post_check_specify
+
+  post_check_specify:
+    type: step
+    command: |
+      SPEC_FILE=$(echo '{{.states.create_feature.Output}}' | grep '^SPEC_FILE=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/post-check-specify.sh" "$SPEC_FILE"
+    transitions:
+      - when: "states.post_check_specify.Output contains 'CLARIFICATION_CHECK=warn'"
+        goto: clarification_warning
+      - goto: create_checklist
+
+  clarification_warning:
+    type: step
+    command: |
+      echo "WARNING: Agent exceeded 3 NEEDS CLARIFICATION markers."
+      echo "{{.states.post_check_specify.Output}}"
+    on_success: create_checklist
+
+  create_checklist:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.create_feature.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      FEATURE_NAME=$(basename "$FEATURE_DIR")
+      "{{.awf.scripts_dir}}/create-requirements-checklist.sh" "$FEATURE_DIR" "$FEATURE_NAME"
+    on_success: validate_spec
+
+  validate_spec:
+    type: step
+    command: |
+      SPEC_FILE=$(echo '{{.states.create_feature.Output}}' | grep '^SPEC_FILE=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/validate-spec.sh" "$SPEC_FILE"
+    transitions:
+      - when: "states.validate_spec.Output contains 'VALID=false'"
+        goto: validation_warning
+      - goto: done
+
+  validation_warning:
+    type: step
+    command: |
+      echo "WARNING: Specification validation found issues:"
+      echo "{{.states.validate_spec.Output}}"
+    on_success: done
+
+  done:
+    type: terminal
+    status: success

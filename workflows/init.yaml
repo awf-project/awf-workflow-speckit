@@ -1,0 +1,43 @@
+name: init
+description: "Initialize Specification-Driven Development structure in a project"
+
+states:
+  initial: create_dirs
+
+  create_dirs:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      PROJECT_NAME=$(basename "$REPO_ROOT")
+      mkdir -p "$REPO_ROOT/specs"
+      mkdir -p "$REPO_ROOT/.awf/templates/speckit"
+      echo "PROJECT_NAME=$PROJECT_NAME"
+      echo "REPO_ROOT=$REPO_ROOT"
+    on_success: copy_templates
+
+  copy_templates:
+    type: step
+    command: |
+      REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+      PACK_TEMPLATES="{{.awf.prompts_dir}}/templates"
+      TARGET="$REPO_ROOT/.awf/templates/speckit"
+      copied=0
+      for tmpl in spec-template.md plan-template.md tasks-template.md constitution-template.md checklist-template.md agent-file-template.md; do
+        src="$PACK_TEMPLATES/$tmpl"
+        dst="$TARGET/$tmpl"
+        if [ -f "$src" ] && [ ! -f "$dst" ]; then
+          cp "$src" "$dst"
+          copied=$((copied + 1))
+          echo "Copied: $tmpl"
+        elif [ -f "$dst" ]; then
+          echo "Skipped (exists): $tmpl"
+        else
+          echo "Warning: template not found: $tmpl" >&2
+        fi
+      done
+      echo "Templates copied: $copied"
+    on_success: done
+
+  done:
+    type: terminal
+    status: success

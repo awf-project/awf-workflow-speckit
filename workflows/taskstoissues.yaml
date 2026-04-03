@@ -1,0 +1,44 @@
+name: taskstoissues
+description: "Convert tasks from tasks.md into GitHub Issues"
+
+states:
+  initial: check_prereqs
+
+  check_prereqs:
+    type: step
+    command: "{{.awf.scripts_dir}}/check-prerequisites.sh --require-tasks --include-tasks"
+    on_success: validate_remote
+    on_failure: {message: "Prerequisites check failed: {{.states.check_prereqs.Stderr}}", status: 1}
+
+  validate_remote:
+    type: step
+    command: |
+      REMOTE=$(git config --get remote.origin.url 2>/dev/null || echo "")
+      if [ -z "$REMOTE" ]; then
+        echo "ERROR: No git remote configured"
+        exit 1
+      fi
+      if ! echo "$REMOTE" | grep -qi "github"; then
+        echo "ERROR: Remote is not a GitHub URL: $REMOTE"
+        exit 1
+      fi
+      OWNER_REPO=$(echo "$REMOTE" | sed 's|.*github\.com[:/]||' | sed 's|\.git$||')
+      echo "$OWNER_REPO"
+    on_success: create_issues
+    on_failure: {message: "GitHub remote validation failed: {{.states.validate_remote.Output}}", status: 1}
+
+  create_issues:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      TASKS_FILE="$FEATURE_DIR/tasks.md"
+      OWNER_REPO="{{.states.validate_remote.Output}}"
+      OWNER_REPO=$(echo "$OWNER_REPO" | tr -d '[:space:]')
+      "{{.awf.scripts_dir}}/tasks-to-github-issues.sh" "$TASKS_FILE" "$OWNER_REPO"
+    timeout: 300
+    on_success: done
+    on_failure: {message: "Issue creation failed: {{.states.create_issues.Stderr}}", status: 1}
+
+  done:
+    type: terminal
+    status: success

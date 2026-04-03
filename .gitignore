@@ -1,0 +1,6 @@
+*.tar.gz
+checksums.txt
+dist/
+.grepai/
+spec-kit/
+.awf/workflow-packs/

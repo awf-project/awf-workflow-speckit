@@ -1,0 +1,73 @@
+name: checklist
+description: "Generate a quality checklist for requirements validation"
+
+inputs:
+  - name: domain
+    description: "Checklist domain (ux, api, security, performance, etc.)"
+    required: true
+
+states:
+  initial: check_prereqs
+
+  check_prereqs:
+    type: step
+    command: "{{.awf.scripts_dir}}/check-prerequisites.sh"
+    on_success: resolve_ids
+    on_failure: {message: "Prerequisites check failed: {{.states.check_prereqs.Stderr}}", status: 1}
+
+  resolve_ids:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/resolve-chk-id.sh" "$FEATURE_DIR" "{{.inputs.domain}}"
+    on_success: build_manifest
+
+  build_manifest:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/build-context-manifest.sh" "$FEATURE_DIR"
+    on_success: load_spec
+
+  load_spec:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      cat "$FEATURE_DIR/spec.md"
+    on_success: load_optional
+
+  load_optional:
+    type: step
+    command: |
+      MANIFEST='{{.states.build_manifest.Output}}'
+      FEATURE_DIR=$(echo "$MANIFEST" | grep '^FEATURE_DIR=' | cut -d= -f2-)
+
+      echo "=== plan.md ==="
+      if echo "$MANIFEST" | grep -q '^PLAN=true'; then
+        cat "$FEATURE_DIR/plan.md"
+      else
+        echo "(not available)"
+      fi
+
+      echo ""
+      echo "=== tasks.md ==="
+      if echo "$MANIFEST" | grep -q '^TASKS=true'; then
+        cat "$FEATURE_DIR/tasks.md"
+      else
+        echo "(not available)"
+      fi
+    on_success: generate_checklist
+
+  generate_checklist:
+    type: agent
+    provider: claude
+    prompt_file: "{{.awf.prompts_dir}}/checklist/system.md"
+    options:
+      allowedTools: "Read,Grep,Glob,Edit,Write"
+      dangerouslySkipPermissions: true
+    timeout: 300
+    on_success: done
+
+  done:
+    type: terminal
+    status: success

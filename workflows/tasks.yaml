@@ -1,0 +1,110 @@
+name: tasks
+description: "Generate an actionable task list from the implementation plan"
+
+inputs:
+  - name: context
+    description: "Additional context for task generation"
+    required: false
+    default: ""
+
+states:
+  initial: check_prereqs
+
+  check_prereqs:
+    type: step
+    command: "{{.awf.scripts_dir}}/check-prerequisites.sh"
+    on_success: build_manifest
+    on_failure: {message: "Prerequisites check failed: {{.states.check_prereqs.Stderr}}", status: 1}
+
+  build_manifest:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/build-context-manifest.sh" "$FEATURE_DIR"
+    on_success: load_plan
+
+  load_plan:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      cat "$FEATURE_DIR/plan.md"
+    on_success: load_spec
+
+  load_spec:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      cat "$FEATURE_DIR/spec.md"
+    on_success: load_optional
+
+  load_optional:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+
+      echo "=== data-model.md ==="
+      if echo '{{.states.build_manifest.Output}}' | grep -q '^DATA_MODEL=true'; then
+        cat "$FEATURE_DIR/data-model.md"
+      else
+        echo "(not available)"
+      fi
+
+      echo ""
+      echo "=== contracts/ ==="
+      if echo '{{.states.build_manifest.Output}}' | grep -q '^CONTRACTS=true'; then
+        for f in $(find "$FEATURE_DIR/contracts" -maxdepth 1 -type f \( -name '*.md' -o -name '*.yaml' -o -name '*.json' \) 2>/dev/null); do
+          echo "--- $(basename "$f") ---"
+          cat "$f"
+          echo ""
+        done
+      else
+        echo "(not available)"
+      fi
+
+      echo ""
+      echo "=== research.md ==="
+      if echo '{{.states.build_manifest.Output}}' | grep -q '^RESEARCH=true'; then
+        cat "$FEATURE_DIR/research.md"
+      else
+        echo "(not available)"
+      fi
+
+      echo ""
+      echo "=== quickstart.md ==="
+      if echo '{{.states.build_manifest.Output}}' | grep -q '^QUICKSTART=true'; then
+        cat "$FEATURE_DIR/quickstart.md"
+      else
+        echo "(not available)"
+      fi
+    on_success: generate_tasks
+
+  generate_tasks:
+    type: agent
+    provider: claude
+    prompt_file: "{{.awf.prompts_dir}}/tasks/system.md"
+    options:
+      allowedTools: "Read,Grep,Glob,Edit,Write"
+      dangerouslySkipPermissions: true
+    timeout: 600
+    on_success: post_check_tasks
+
+  post_check_tasks:
+    type: step
+    command: |
+      FEATURE_DIR=$(echo '{{.states.check_prereqs.Output}}' | grep '^FEATURE_DIR=' | cut -d= -f2-)
+      "{{.awf.scripts_dir}}/post-check-tasks.sh" "$FEATURE_DIR/tasks.md"
+    transitions:
+      - when: "states.post_check_tasks.Output contains 'FORMAT_CHECK=fail'"
+        goto: tasks_format_warning
+      - goto: done
+
+  tasks_format_warning:
+    type: step
+    command: |
+      echo "WARNING: Some tasks have malformed format."
+      echo "{{.states.post_check_tasks.Output}}"
+    on_success: done
+
+  done:
+    type: terminal
+    status: success

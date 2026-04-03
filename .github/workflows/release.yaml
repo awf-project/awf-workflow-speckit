@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate pack structure
+        run: |
+          grep -q '^name: speckit$' manifest.yaml
+          for w in init constitution specify clarify plan tasks analyze checklist implement taskstoissues; do
+            test -f "workflows/$w.yaml" || { echo "MISSING: workflows/$w.yaml"; exit 1; }
+          done
+          echo "Validation passed"
+
+  release:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify manifest version matches tag
+        run: |
+          MANIFEST_VERSION=$(grep '^version:' manifest.yaml | sed 's/version: *"\?\([^"]*\)"\?/\1/')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "ERROR: manifest version ($MANIFEST_VERSION) != tag version ($TAG_VERSION)"
+            exit 1
+          fi
+
+      - name: Build pack archive
+        run: |
+          ARCHIVE="awf-workflow-speckit_${{ steps.version.outputs.version }}.tar.gz"
+          tar czf "$ARCHIVE" manifest.yaml workflows/ prompts/ scripts/
+          sha256sum "$ARCHIVE" > checksums.txt
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "$ARCHIVE" checksums.txt \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes
