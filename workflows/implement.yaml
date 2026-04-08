@@ -110,8 +110,8 @@ states:
     provider: claude
     prompt_file: "{{.awf.prompts_dir}}/implement/phase.md"
     options:
-      allowedTools: "Read,Grep,Glob,Edit,Write,Bash"
-      dangerouslySkipPermissions: true
+      allowed_tools: "Read,Grep,Glob,Edit,Write,Bash"
+      dangerously_skip_permissions: true
     timeout: 600
     on_failure: {message: "Phase execution failed: {{.states.execute_phase.Stderr}}", status: 1}
 

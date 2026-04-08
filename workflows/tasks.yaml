@@ -83,8 +83,8 @@ states:
     provider: claude
     prompt_file: "{{.awf.prompts_dir}}/tasks/system.md"
     options:
-      allowedTools: "Read,Grep,Glob,Edit,Write"
-      dangerouslySkipPermissions: true
+      allowed_tools: "Read,Grep,Glob,Edit,Write"
+      dangerously_skip_permissions: true
     timeout: 600
     on_success: post_check_tasks
 

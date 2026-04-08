@@ -230,8 +230,8 @@ states:
         Ambiguities scan: {{.states.scan_spec.Output}}
         {{if .inputs.context}}Context: {{.inputs.context}}{{end}}
     options:
-      allowedTools: "Read,Grep,Glob,Edit,Write"
-      dangerouslySkipPermissions: true
+      allowed_tools: "Read,Grep,Glob,Edit,Write"
+      dangerously_skip_permissions: true
     timeout: 300
     on_success: report
 

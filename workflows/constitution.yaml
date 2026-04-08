@@ -75,8 +75,8 @@ states:
     provider: claude
     prompt_file: "{{.awf.prompts_dir}}/constitution/system.md"
     options:
-      allowedTools: "Read,Grep,Glob,Edit,Write"
-      dangerouslySkipPermissions: true
+      allowed_tools: "Read,Grep,Glob,Edit,Write"
+      dangerously_skip_permissions: true
     timeout: 1300
     on_success: post_check_constitution
 

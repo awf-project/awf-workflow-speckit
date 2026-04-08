@@ -69,8 +69,8 @@ states:
     provider: claude
     prompt_file: "{{.awf.prompts_dir}}/analyze/system.md"
     options:
-      allowedTools: "Read,Grep,Glob"
-      dangerouslySkipPermissions: true
+      allowed_tools: "Read,Grep,Glob"
+      dangerously_skip_permissions: true
     timeout: 600
     on_success: post_check
 
