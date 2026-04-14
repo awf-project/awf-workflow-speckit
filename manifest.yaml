@@ -1,5 +1,5 @@
 name: speckit
-version: "0.1.0"
+version: "0.1.1"
 description: "Specification-Driven Development workflow pack for AWF"
 author: "awf-project"
 license: MIT

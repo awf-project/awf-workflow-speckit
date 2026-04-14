@@ -37,7 +37,7 @@ states:
     system_prompt: |
       You are a specification analyst. Your role is to detect and reduce ambiguity in feature specifications.
       If additional context was provided for prioritization, consider it before proceeding.
-      When the questioning loop is complete, output NO_MORE_QUESTIONS on its own line.
+      The session ends when the user submits an empty line.
     prompt: |
       ## Pre-computed Data
 
@@ -204,31 +204,19 @@ states:
          - If any Outstanding or Deferred remain, recommend whether to proceed to `speckit/plan` or run `speckit/clarify` again later post-plan.
          - Suggested next command.
 
-      ## Loop Termination Signal
+      ## Session End
 
-      **CRITICAL**: When the questioning loop is complete (all questions answered, user signals done, or 5 questions reached), you MUST output the following string on its own line:
-
-      ```
-      NO_MORE_QUESTIONS
-      ```
-
-      AWF uses this exact string to detect loop exit. Without it, the workflow will continue iterating. Output it as the final line of your response once the session is finished.
+      The session is interactive: the user answers each question directly in the terminal. When all questions are resolved (or the user signals "stop"/"done"/"proceed"), print the final Report and instruct the user to submit an empty line to exit.
 
       ## Behavior Rules
 
-      - If no meaningful ambiguities found (or all potential questions would be low-impact), respond: "No critical ambiguities detected worth formal clarification." and suggest proceeding, then output `NO_MORE_QUESTIONS`.
-      - If spec file missing, instruct user to run `speckit/specify` first (do not create a new spec here), then output `NO_MORE_QUESTIONS`.
+      - If no meaningful ambiguities found (or all potential questions would be low-impact), respond: "No critical ambiguities detected worth formal clarification." and suggest proceeding.
+      - If spec file missing, instruct user to run `speckit/specify` first (do not create a new spec here).
       - Never exceed 5 total asked questions (clarification retries for a single question do not count as new questions).
       - Avoid speculative tech stack questions unless the absence blocks functional clarity.
-      - Respect user early termination signals ("stop", "done", "proceed") — output `NO_MORE_QUESTIONS` immediately upon receiving them.
-      - If no questions asked due to full coverage, output a compact coverage summary (all categories Clear) then output `NO_MORE_QUESTIONS`.
-      - If quota reached with unresolved high-impact categories remaining, explicitly flag them under Deferred with rationale, then output `NO_MORE_QUESTIONS`.
-    conversation:
-      max_turns: 5
-      stop_condition: "inputs.response contains 'NO_MORE_QUESTIONS'"
-      inject_context: |
-        Ambiguities scan: {{.states.scan_spec.Output}}
-        {{if .inputs.context}}Context: {{.inputs.context}}{{end}}
+      - Respect user early termination signals ("stop", "done", "proceed") — print the Report immediately.
+      - If no questions asked due to full coverage, output a compact coverage summary (all categories Clear).
+      - If quota reached with unresolved high-impact categories remaining, explicitly flag them under Deferred with rationale.
     options:
       allowed_tools: "Read,Grep,Glob,Edit,Write"
       dangerously_skip_permissions: true
